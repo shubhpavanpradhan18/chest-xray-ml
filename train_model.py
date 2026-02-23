@@ -1,7 +1,7 @@
 # ======================================================
 # FINAL OPTIMIZED CHEST X-RAY TRAINING SCRIPT
-# FIXED for Jenkins SYSTEM user + Truncated Weights Error
-# High Accuracy (80%+) + Stable + No Freeze
+# FIXED FOR USERNAME = heman (Local + Jenkins Compatible)
+# Includes: Grad-CAM + High Accuracy + Stable CPU Training
 # ======================================================
 
 # ======================================================
@@ -12,7 +12,7 @@ import tensorflow as tf
 import numpy as np
 import cv2
 
-# IMPORTANT: Jenkins runs in headless mode (no GUI)
+# Headless mode (important for Jenkins & no display systems)
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -27,13 +27,14 @@ from sklearn.metrics import classification_report, confusion_matrix
 
 
 # ======================================================
-# 2. DATASET & OUTPUT PATHS (JENKINS COMPATIBLE)
+# 2. DATASET & OUTPUT PATHS (LOCAL WINDOWS SETUP)
 # ======================================================
 BASE_PATH = r"C:\jenkins-ml\datasets\chest_xray"
 TRAIN_PATH = os.path.join(BASE_PATH, "train")
 VAL_PATH   = os.path.join(BASE_PATH, "val")
 TEST_PATH  = os.path.join(BASE_PATH, "test")
 
+# Output folder (model + graphs + gradcam)
 OUTPUT_DIR = r"C:\jenkins-ml\outputs"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -41,15 +42,15 @@ print("Dataset Path:", BASE_PATH)
 
 
 # ======================================================
-# 3. PERFORMANCE SETTINGS (STABLE FOR JENKINS + CPU)
+# 3. PERFORMANCE SETTINGS (OPTIMIZED FOR LAPTOP CPU)
 # ======================================================
 IMG_SIZE = (160, 160)   # Good balance of speed + accuracy
-BATCH_SIZE = 4          # Reduced (prevents Jenkins RAM crash)
-EPOCHS = 6              # Faster but still high accuracy
+BATCH_SIZE = 4          # Low RAM usage (safe for laptops)
+EPOCHS = 6              # Faster training with good accuracy
 
 
 # ======================================================
-# 4. DATA AUGMENTATION (BOOST ACCURACY)
+# 4. DATA AUGMENTATION (IMPROVES ACCURACY)
 # ======================================================
 train_gen = ImageDataGenerator(
     rescale=1./255,
@@ -92,33 +93,32 @@ print("Detected Classes:", CLASS_LABELS)
 
 
 # ======================================================
-# 5. LOAD MOBILENETV2 WITH EXPLICIT LOCAL WEIGHTS (CRITICAL FIX)
-# This avoids Jenkins SYSTEM user cache corruption issue
+# 5. LOAD PRETRAINED MOBILENETV2 WEIGHTS (USERNAME = heman)
 # ======================================================
-WEIGHTS_PATH = r"C:\Users\HP\.keras\models\mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_160_no_top.h5"
+WEIGHTS_PATH = r"C:\Users\heman\.keras\models\mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_160_no_top.h5"
 
 print("Loading pretrained weights from:", WEIGHTS_PATH)
 
-# Initialize model WITHOUT automatic ImageNet loading
+# Initialize base model WITHOUT auto-download
 base_model = MobileNetV2(
-    weights=None,   # IMPORTANT: Disable auto-cache (fix truncated file error)
+    weights=None,  # Prevents internet download & Jenkins cache issues
     include_top=False,
     input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3)
 )
 
-# Manually load correct local weights (bypasses SYSTEM corrupted cache)
+# Manually load local weights
 base_model.load_weights(WEIGHTS_PATH)
 print("Pretrained ImageNet weights loaded successfully!")
 
 
 # ======================================================
-# 6. FINE-TUNING STRATEGY (KEY FOR 80%+ ACCURACY)
+# 6. FINE-TUNING STRATEGY (FOR 80%+ ACCURACY)
 # ======================================================
-# Freeze early layers (generic feature extraction)
+# Freeze early layers (generic features)
 for layer in base_model.layers[:-40]:
     layer.trainable = False
 
-# Unfreeze last layers (learn medical X-ray patterns)
+# Unfreeze last layers (learn X-ray patterns)
 for layer in base_model.layers[-40:]:
     layer.trainable = True
 
@@ -136,7 +136,7 @@ model = Model(inputs=base_model.input, outputs=output)
 
 
 # ======================================================
-# 8. COMPILE MODEL (OPTIMIZED FOR CPU TRAINING)
+# 8. COMPILE MODEL
 # ======================================================
 model.compile(
     optimizer=Adam(learning_rate=0.0001),
@@ -148,7 +148,7 @@ model.summary()
 
 
 # ======================================================
-# 9. TRAINING WITH EARLY STOPPING (FASTER + STABLE)
+# 9. TRAIN MODEL (EARLY STOPPING = FASTER + STABLE)
 # ======================================================
 early_stop = EarlyStopping(
     monitor="val_loss",
@@ -156,7 +156,7 @@ early_stop = EarlyStopping(
     restore_best_weights=True
 )
 
-print("\nStarting Optimized Training (Jenkins + Stable + High Accuracy)...")
+print("\nStarting Optimized Training (Fast + High Accuracy)...")
 
 history = model.fit(
     train_data,
@@ -183,7 +183,7 @@ cm = confusion_matrix(y_true, y_pred)
 
 
 # ======================================================
-# 11. SAVE MODEL & OUTPUTS (JENKINS SAFE - NO GUI)
+# 11. SAVE MODEL & OUTPUT GRAPHS (HEADLESS SAFE)
 # ======================================================
 model_path = os.path.join(OUTPUT_DIR, "optimized_model.keras")
 model.save(model_path)
@@ -211,15 +211,75 @@ plt.savefig(os.path.join(OUTPUT_DIR, "loss_curve.png"))
 plt.close()
 
 # Confusion Matrix
-plt.figure(figsize=(6,5))
+plt.figure(figsize=(6, 5))
 plt.imshow(cm)
 plt.title("Confusion Matrix")
 plt.colorbar()
 plt.xticks(range(NUM_CLASSES), CLASS_LABELS, rotation=45)
 plt.yticks(range(NUM_CLASSES), CLASS_LABELS)
+plt.xlabel("Predicted")
+plt.ylabel("True")
 plt.savefig(os.path.join(OUTPUT_DIR, "confusion_matrix.png"))
 plt.close()
 
+
+# ======================================================
+# 12. GRAD-CAM VISUALIZATION (SAVED AS IMAGE)
+# ======================================================
+print("\nGenerating Grad-CAM Visualization...")
+
+sample_image_path = os.path.join(TEST_PATH, test_data.filenames[0])
+
+img = tf.keras.preprocessing.image.load_img(
+    sample_image_path, target_size=IMG_SIZE
+)
+img_array = tf.keras.preprocessing.image.img_to_array(img)
+img_array = np.expand_dims(img_array, axis=0) / 255.0
+
+predictions = model.predict(img_array)
+predicted_class = np.argmax(predictions[0])
+
+def grad_cam(model, img_array, last_conv_layer_name, class_index):
+    grad_model = tf.keras.models.Model(
+        model.inputs,
+        [model.get_layer(last_conv_layer_name).output, model.output]
+    )
+
+    with tf.GradientTape() as tape:
+        conv_outputs, predictions = grad_model(img_array)
+        loss = predictions[:, class_index]
+
+    grads = tape.gradient(loss, conv_outputs)
+    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+
+    conv_outputs = conv_outputs[0]
+    heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
+    heatmap = tf.squeeze(heatmap)
+
+    heatmap = tf.maximum(heatmap, 0)
+    heatmap /= tf.reduce_max(heatmap + 1e-8)
+
+    return heatmap.numpy()
+
+heatmap = grad_cam(
+    model,
+    img_array,
+    last_conv_layer_name="Conv_1",
+    class_index=predicted_class
+)
+
+heatmap = np.uint8(255 * heatmap)
+heatmap = cv2.resize(heatmap, IMG_SIZE)
+heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+
+img_cv = cv2.imread(sample_image_path)
+img_cv = cv2.resize(img_cv, IMG_SIZE)
+
+overlay = cv2.addWeighted(img_cv, 0.6, heatmap, 0.4, 0)
+
+gradcam_path = os.path.join(OUTPUT_DIR, "gradcam_result.png")
+cv2.imwrite(gradcam_path, overlay)
+
+print("Grad-CAM image saved at:", gradcam_path)
 print("\nTraining Completed Successfully!")
-print("Final Model saved at:", model_path)
 print("All outputs saved in:", OUTPUT_DIR)
