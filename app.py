@@ -7,7 +7,7 @@ from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from PIL import Image
 import matplotlib.cm as cm
 
-MODEL_PATH = "pneumonia_model.keras"
+WEIGHTS_PATH = "pneumonia_weights.h5"
 IMG_SIZE = (160, 160)
 CLASSES = ["NORMAL", "PNEUMONIA"]
 
@@ -16,7 +16,23 @@ st.set_page_config(page_title="Chest X-ray pneumonia screening", page_icon="🫁
 
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model(MODEL_PATH)
+    """Rebuild the training architecture, then load the trained weights.
+
+    Rebuilding in code (instead of loading a .keras file) keeps the demo
+    working across TensorFlow versions -- a saved model carries serialized
+    layer config that often fails to reload on a different version.
+    """
+    base = tf.keras.applications.MobileNetV2(
+        weights=None, include_top=False, input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3)
+    )
+    x = base.output
+    x = tf.keras.layers.GlobalAveragePooling2D()(x)
+    x = tf.keras.layers.Dense(128, activation="relu")(x)
+    x = tf.keras.layers.Dropout(0.4)(x)
+    out = tf.keras.layers.Dense(len(CLASSES), activation="softmax")(x)
+    model = tf.keras.models.Model(inputs=base.input, outputs=out)
+    model.load_weights(WEIGHTS_PATH)
+    return model
 
 
 def prepare(img):
