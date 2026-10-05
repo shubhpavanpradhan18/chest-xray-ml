@@ -10,6 +10,7 @@ import matplotlib.cm as cm
 WEIGHTS_PATH = "pneumonia_weights.h5"
 IMG_SIZE = (160, 160)
 CLASSES = ["NORMAL", "PNEUMONIA"]
+UNCERTAIN_LOW = 0.35      # below this: call it normal; above the threshold: pneumonia
 
 st.set_page_config(page_title="Chest X-ray pneumonia screening", page_icon="🫁", layout="wide")
 
@@ -33,6 +34,38 @@ def load_model():
     model = tf.keras.models.Model(inputs=base.input, outputs=out)
     model.load_weights(WEIGHTS_PATH)
     return model
+
+
+def looks_like_xray(img):
+    """Cheap sanity check on the upload.
+
+    The model will answer confidently for ANY image -- a holiday photo included --
+    because softmax always sums to 1. These checks catch the obvious cases:
+    an X-ray is greyscale, roughly portrait or square, and reasonably large.
+    Returns (ok, reason).
+    """
+    w, h = img.size
+    if min(w, h) < 100:
+        return False, f"This image is only {w}x{h} pixels. X-rays are much larger."
+
+    ratio = w / h
+    if ratio < 0.5 or ratio > 2.0:
+        return False, f"This image is {ratio:.1f}:1. Chest X-rays are closer to square."
+
+    small = np.array(img.convert("RGB").resize((64, 64))).astype("float32")
+    colour_spread = float(np.abs(small - small.mean(axis=2, keepdims=True)).mean())
+    if colour_spread > 12:
+        return False, "This image is in colour. Chest X-rays are greyscale."
+
+    grey = small.mean(axis=2)
+    if grey.std() < 12:
+        return False, "This image is nearly uniform, with none of the contrast an X-ray has."
+
+    # Scans, screenshots and documents are mostly white paper; X-rays are not.
+    if float(np.mean(grey > 230)) > 0.45:
+        return False, "This looks like a document or screenshot rather than a radiograph."
+
+    return True, ""
 
 
 def prepare(img):
@@ -114,11 +147,29 @@ uploaded = st.file_uploader("Upload a chest X-ray (JPG or PNG)", type=["jpg", "j
 
 if uploaded:
     img = Image.open(uploaded)
+
+    ok, reason = looks_like_xray(img)
+    if not ok:
+        st.error(f"This does not look like a chest X-ray. {reason}")
+        st.caption(
+            "The model has only ever seen chest X-rays, and it will still produce a confident "
+            "answer for any image you give it. That answer would be meaningless."
+        )
+        show_image(st, img, "Uploaded image")
+        if not st.checkbox("Analyse it anyway (the result will not mean anything)"):
+            st.stop()
+
     x = prepare(img)
     model = load_model()
     probs = model.predict(x, verbose=0)[0]
     threshold = load_threshold()
-    idx = 1 if probs[1] >= threshold else 0
+    p_pneumonia = float(probs[1])
+    if p_pneumonia >= threshold:
+        idx, verdict, tone = 1, "PNEUMONIA", "error"
+    elif p_pneumonia >= UNCERTAIN_LOW:
+        idx, verdict, tone = 1, "UNCERTAIN", "warning"
+    else:
+        idx, verdict, tone = 0, "NORMAL", "success"
 
     left, middle, right = st.columns(3)
     show_image(left, img, "Uploaded X-ray")
@@ -132,15 +183,26 @@ if uploaded:
     except Exception:
         middle.info("Heatmap unavailable for this model structure.")
 
-    st.subheader(f"Prediction: {CLASSES[idx]}")
+    st.subheader(f"Result: {verdict}")
+    if verdict == "UNCERTAIN":
+        st.warning(
+            f"The model puts pneumonia at {p_pneumonia:.0%}, between the two decision points "
+            f"({UNCERTAIN_LOW:.0%} and {threshold:.0%}). It is not confident either way, so this "
+            "needs a radiologist rather than a label."
+        )
+    elif verdict == "PNEUMONIA":
+        st.error("Signs consistent with pneumonia. This is a flag for review, not a diagnosis.")
+    else:
+        st.success("No signs of pneumonia found by the model.")
     for name, p in zip(CLASSES, probs):
         st.write(f"{name}: {p:.1%}")
         st.progress(float(p))
 
-    st.warning(
-        "On the held-out test set this model catches almost every pneumonia case "
-        "but flags roughly a third of healthy X-rays as pneumonia. Treat a PNEUMONIA "
-        "result as 'worth a radiologist's look', never as a diagnosis."
+    st.caption(
+        "Measured on 624 held-out images from one public paediatric dataset: sensitivity 0.97, "
+        "specificity 0.84. It missed 13 of 390 pneumonia cases and flagged 37 of 234 healthy ones. "
+        "Performance on adult X-rays, other hospitals or other machines is untested and may be "
+        "considerably worse."
     )
 else:
     st.info("Upload an X-ray to see a prediction and the region the model focused on.")
