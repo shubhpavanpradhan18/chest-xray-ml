@@ -1,0 +1,24 @@
+{
+  "test_accuracy": 0.9198717948717948,
+  "classes": [
+    "NORMAL",
+    "PNEUMONIA"
+  ],
+  "threshold": 0.8000000000000002,
+  "confusion_matrix": [
+    [
+      197,
+      37
+    ],
+    [
+      13,
+      377
+    ]
+  ],
+  "sensitivity": 0.9666666666666667,
+  "specificity": 0.8418803418803419,
+  "true_positives": 377,
+  "false_negatives": 13,
+  "true_negatives": 197,
+  "false_positives": 37
+}
