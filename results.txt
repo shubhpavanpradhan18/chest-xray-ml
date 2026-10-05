@@ -1,0 +1,15 @@
+Decision threshold: 0.80
+Test accuracy: 0.9199
+
+              precision    recall  f1-score   support
+
+      NORMAL      0.938     0.842     0.887       234
+   PNEUMONIA      0.911     0.967     0.938       390
+
+    accuracy                          0.920       624
+   macro avg      0.924     0.904     0.913       624
+weighted avg      0.921     0.920     0.919       624
+
+Confusion matrix (rows = true, cols = predicted):
+[[197  37]
+ [ 13 377]]
